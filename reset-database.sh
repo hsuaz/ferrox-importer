@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 mysql -u ferrox <<END
 DROP DATABASE furaffinity;
 CREATE DATABASE furaffinity;
