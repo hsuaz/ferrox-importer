@@ -1,5 +1,9 @@
 #!/usr/bin/perl
 
+# XXX reconstruct note conversation threads if at all possible
+# XXX next: SUBMISSIONS oh gosh
+# XXX need to avoid holes in messages table if at all possible...
+
 ### STATUS
 #      df_admin_notes
 #      df_adminactions
@@ -68,6 +72,7 @@ STDOUT->autoflush(1);
 sub import_data {
     my ($action, $code_ref) = @_;
 
+    my $start_time = time;
     print '* ', $action, '...';
     eval {
         local $dbh->{PrintError} = 0;
@@ -88,7 +93,7 @@ sub import_data {
         print $err;
     }
     else {
-        print "[ ok ]\n";
+        printf "[%3ds]\n", time - $start_time;
     }
 
     return;
@@ -115,6 +120,7 @@ import_data 'Message table setup' => sub {
 #   old 4 == new X: banned
 # If you change these here, CHANGE THEM BELOW TOO!
 import_data 'Roles' => sub {
+    die 'skip for now; websetup should do this';
     $dbh->do(qq{
         INSERT INTO $new.roles
             (id, name, sigil, description)
@@ -127,16 +133,17 @@ import_data 'Roles' => sub {
 
 import_data 'Users' => sub {
     # Use IGNORE here to skip duplicated usernames; we only want the first
+    # XXX use names or something
     $dbh->do(qq{
         INSERT IGNORE INTO $new.users
             (id, username, email, password, display_name, role_id)
         SELECT
             userid, lower, regemail, userpassword, username,
             CASE accesslevel
-                WHEN 0 THEN 2
-                WHEN 1 THEN 3
-                WHEN 4 THEN 1  -- XXX
-                ELSE 1
+                WHEN 0 THEN 5
+                WHEN 1 THEN 6
+                WHEN 4 THEN 4
+                ELSE 5
             END
         FROM $old.df_users
     });
@@ -230,7 +237,6 @@ import_data 'Blocks' => sub {
         WHERE to_user_id IS NOT NULL
     });
 };
-exit;
 
 # -------------------------------------------------------------------------- #
 
@@ -278,10 +284,6 @@ import_data 'News' => sub {
     });
 };
 
-# XXX reconstruct conversation threads if at all possible
-# XXX XXX XXX XXX XXX XXX XXX this is a cool color
-# XXX next: then SUBMISSIONS oh gosh
-# XXX need to avoid holes in messages table if at all possible...
 import_data 'Notes' => sub {
     $dbh->do(qq{
         UPDATE message_ids
@@ -378,6 +380,7 @@ import_data 'User metadata' => sub { die 'todo' };
 
 import_data 'User preferences' => sub { die 'todo' };
 
+# XXX comments
 import_data 'Submissions' => sub {
     $dbh->do(qq{
         INSERT INTO $new.submissions
@@ -400,10 +403,28 @@ import_data 'Submissions' => sub {
             '',  -- XXX mogile importing
             '',  -- XXX mimetype
             NULL
-        FROM $old.df_submissions
-        LIMIT 100
+        FROM $old.df_submissions s
+
+        -- ignore deleted users
+        INNER JOIN $new.users u
+            ON s.user = u.id
     });
-    # XXX take off the limit when this is done
+
+    # Artist association
+    $dbh->do(qq{
+        INSERT INTO $new.user_submissions
+            (user_id, submission_id, relationship, ownership_status)
+        SELECT
+            user,
+            rowid,
+            'artist',
+            'primary'
+        FROM $old.df_submissions s
+
+        -- ignore deleted users
+        INNER JOIN $new.users u
+            ON s.user = u.id
+    });
 };
 
 import_data 'Favorites' => sub {
