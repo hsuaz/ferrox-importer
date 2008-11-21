@@ -1,61 +1,321 @@
 #!/usr/bin/perl
 
-# XXX reconstruct note conversation threads if at all possible
-# XXX next: SUBMISSIONS oh gosh
-# XXX need to avoid holes in messages table if at all possible...
+# NEXT UP
+# - comments woo
+# - comment COUNTS per discussion when all is said and done
+# - reconstruct note conversation threads
 
 ### STATUS
-#      df_admin_notes
-#      df_adminactions
-#      df_administratormessages
-#      df_adminmessagereplies
-#      df_artistinfo
-#      df_comments
-# DONE df_favorites
-#      df_imageviews
-#      df_journal_comments
-# DONE df_journals
-# DONE df_news
-#      df_pageviews
-#      df_security_breaches
-#      df_shouts
-# WONT df_shouts_copy
-# WONT df_submission_locks
-# PART df_submissions
-######   need stats, views, some metadata, and the image itself
-# WONT df_suspensions
-# ???? df_tmpsubmissions
-# DONE df_tracking
-#      df_troubletickets
-#      df_ttreplies
-# WONT df_user_notes
-# WONT df_user_params
-# ???? df_usermessages
-######   perhaps merge with news?
-#      df_usermessages_Comments
-######   this is messages about comments on submissions; expire old ones or..?
-#      df_usermessages_Favorites
-######   same concern as above
-# DONE df_usermessages_Notes
-#      df_usermessages_Shouts
+#      artistinfo
+#           user_id
+#           othersite1
+#           othersite2
+#           othersite3
+#           othersite1_link
+#           othersite2_link
+#           othersite3_link
+#           acceptingtrades
+#           acceptingrequests
+#           acceptingcommissions
+#           sketchprices
+#           inkprices
+#           digitalprices
+#           otherprices1
+#           otherprices2
+#           otherprices1_name
+#           otherprices2_name
+#           sketchlink
+#           inklink
+#           digitallink
+#           otherprices1link
+#           otherprices2link
+#           sketchlink_color
+#           inklink_color
+#           digitallink_color
+#           productionque
+#           preferedtools
+#           history
+#           yearsdrawing
+
+#      comments_journal
+#           row_id
+#           parent_id
+#           user_id
+#           entity_id
+#           subject
+#           message
+#           date_posted
+#           level
+#           nest_level
+
+#      comments_submission
+#           row_id
+#           parent_id
+#           user_id
+#           entity_id
+#           subject
+#           message
+#           date_posted
+#           level
+#           nest_level
+
+#      comments_troubleticket
+#           rowid
+#           ticketid
+#           userid
+#           isstaff
+#           username
+#           message
+#           date
+
+# SKP? df_adminactions
+###### - useful but I don't see the point of keeping old ones?
+
+# SKP? df_administratormessages
+# SKP? df_adminmessagereplies
+###### - I don't know where these appear and it hasn't been used since 2006
+
+# SKP? df_security_breaches
+###### - no dates and don't really apply to the new software
+
+# SKP? df_submission_locks
+###### - table is empty
+
+# SKP? df_suspensions
+###### - only two rows, seems unused
+
+#      df_usermessages
+###### - fold into news
+#           rowid
+#           userid
+#           username
+#           subject
+#           date
+#           replies
+#           message
+
+#      df_usermessages_Notes
+###### - needs autothreading if possible
+#      DONE rowid
+#      DONE targetid
+#      DONE recipient
+#      DONE sender
+#      DONE fromlower
+#      DONE title
+#      DONE thisdate
+#      DONE isread
+#      DONE message
+#           folder
+
 #      df_usermessages_Tickets
-#      df_usermessages_Watches
+###### - not sure how trouble tickets will work
+
 #      df_usermessagesreplies
-# PART df_users
-######   main user records import; metadata and settings do not
-# WONT fx_captcha
-# WONT fx_sessions
-# WONT fx_user_activation
-# WONT fx_useronline
-# WONT fx_users
-# WONT fx_users_counters
-# WONT fx_users_data
-# WONT fx_users_temp
+###### - fold into news comments
+#           rowid
+#           messageid
+#           userid
+#           topic
+#           username
+#           message
+#           date
+
+#      favorites
+#      SKIP row_id
+#      DONE user_id
+#      DONE submission_id
+#      SKIP category_id
+#           date_created
+
+#      imageviews
+#           user_id
+#           target_id
+#           date_viewed
+
+#      journals
+#      DONE row_id
+#      DONE user_id
+#      DONE date_posted
+#           num_comments
+#      DONE subject
+#      DONE message
+
+#      messagecenter_comments_journal
+#           user_id
+#           entity_id
+
+#      messagecenter_comments_submission
+#           user_id
+#           entity_id
+
+#      messagecenter_favorites
+#           user_id
+#           entity_id
+
 #      messagecenter_journals
+#           user_id
+#           entity_id
+
+#      messagecenter_shouts
+#           user_id
+#           entity_id
+
 #      messagecenter_submissions
-# WONT submission_filenames
-# WONT test
-### END STATUS
+#           user_id
+#           entity_id
+
+#      messagecenter_watches
+#           user_id
+#           entity_id
+
+#      news
+#      DONE rowid
+#      DONE date
+#      DONE user
+#           comments
+#      SKIP username
+#      SKIP lower
+#      DONE subject
+#      DONE message
+
+#      pageviews
+#           user_id
+#           target_id
+#           date_viewed
+
+#      shouts
+#           row_id
+#           date_posted
+#           target_id
+#           user_id
+#           message
+
+#      submissions
+#      DONE rowid
+#      SKIP lock_id
+#      DONE date
+#      DONE user
+#      SKIP username
+#      SKIP lower
+#      DONE title
+#           url
+#           smallerurl
+#           thumbnail
+#           keywords
+#      DONE message
+#           numtracked
+#           comments
+#           views
+#           width
+#           height
+#           story
+#           poetry
+#           category
+#           subtype
+#           adultsubmission
+#           musicfile
+#           isscrap
+#           gender
+#           species
+#           tag
+#           type
+# IRRV submissions_tmp
+#      troubletickets
+#           rowid
+#           userid
+#           username
+#           issuetype
+#           other
+#           message
+#           resolved
+#           lastlookedat
+#           replies
+#           admin
+#           ticketdate
+# PART users
+#      DONE userid
+#      DONE username
+#      DONE lower
+#           fullname
+#      PART userpassword
+#           Csid
+#           useremail
+#      DONE regemail
+#           regdate
+#           lastvisit
+#           lastactivity
+#           homepage
+#           aim
+#           icq
+#           yahoo
+#           msn
+#           biography
+#           location
+#           interests
+#           occupation
+#           bdaymonth
+#           bdayday
+#           bdayyear
+#           gender
+#           typeartist
+#           pageviews
+#           mood
+#           submissions
+#           commentsgiven
+#           commentsrecieved
+#           shouts
+#           favorites
+#           journals
+#           submissionscount
+#           messagescount
+#           ip
+#           commentcount
+#           journalcount
+#           submissioncount
+#           favoritescount
+#           amessagecount
+#           notescount
+#           watchcount
+#           featured
+#           shell
+#           os
+#           quote
+#           music
+#           favoritemovie
+#           favoritegame
+#           favoriteplatform
+#           favoritemusicplayer
+#           favoriteartist
+#           favoriteanimal
+#           favoritewebsite
+#           favoritefood
+#           species
+#           age
+#           seeadultart
+#           maturelocked
+#           fullview
+#           accountlocked
+#           lostpw
+#           stylefolder
+#           stylesheet
+#           profileinfo
+#      DONE blocklist
+#      PART accesslevel
+#           journalheader
+#           journalfooter
+#           siggy
+#           hostname
+#           last_tmp_submission
+#           ttcount
+#           suspended
+#           timezone
+# PART watches
+#      IRRV row_id
+#      DONE user_id
+#      DONE target_id
+#           date_watched
+#      IRRV watch_type
+
 
 use strict;
 use warnings;
@@ -64,7 +324,7 @@ use DBI;
 use IO::Handle;
 
 my $new = 'furaffinity';
-my $old = 'furaffinity_old';
+my $old = 'furaffinity_recent';
 my $dbh = DBI->connect("dbi:mysql:$new", 'ferrox', '');
 
 STDOUT->autoflush(1);
@@ -100,12 +360,84 @@ sub import_data {
 }
 
 
+sub do_messages_setup {
+    my ($args_ref) = @_;
+    my $table = $args_ref->{table};
+
+    $dbh->do(qq{
+        UPDATE message_ids
+        SET other_id = NULL
+    });
+    $dbh->do(qq{
+        INSERT INTO message_ids
+            (other_id)
+        SELECT row_id
+        FROM $old.$table t
+
+        -- ignore deleted users
+        INNER JOIN $new.users u
+            ON t.user_id = u.id
+    });
+}
+
+
+sub do_discussions_setup {
+    my ($args_ref) = @_;
+    my $table = $args_ref->{table};
+
+    $dbh->do(qq{
+        UPDATE discussion_ids
+        SET other_id = NULL
+    });
+    $dbh->do(qq{
+        INSERT INTO discussion_ids
+            (other_id)
+        SELECT row_id
+        FROM $old.$table t
+
+        -- ignore deleted users
+        INNER JOIN $new.users u
+            ON t.user_id = u.id
+    });
+
+    $dbh->do(qq{
+        INSERT INTO $new.discussions
+            (id, comment_count)
+        SELECT
+            id,
+            0
+        FROM discussion_ids
+        WHERE other_id IS NOT NULL
+    });
+
+    return;
+}
+
+sub create_adjacency_list {
+    my ($n_ref, @nodes) = @_;
+    for my $node (@nodes) {
+        $node->{left} = ${$n_ref};
+        ${$n_ref}++;
+
+        create_adjacency_list($n_ref, @{ $node->{children} });
+
+        $node->{right} = ${$n_ref};
+        ${$n_ref}++;
+    }
+}
+
 ### Need to use this table to collapse message ids together and keep them
 ### matched with their corresponding original rows
 
-import_data 'Message table setup' => sub {
+import_data 'Temporary table setup' => sub {
     $dbh->do(qq{
         CREATE TEMPORARY TABLE message_ids (
+            id INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
+            other_id INT UNSIGNED UNIQUE
+        )
+    });
+    $dbh->do(qq{
+        CREATE TEMPORARY TABLE discussion_ids (
             id INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
             other_id INT UNSIGNED UNIQUE
         )
@@ -145,7 +477,7 @@ import_data 'Users' => sub {
                 WHEN 4 THEN 4
                 ELSE 5
             END
-        FROM $old.df_users
+        FROM $old.users
     });
 };
 
@@ -158,21 +490,22 @@ import_data 'Watches' => sub {
         INSERT INTO $new.user_relationships
             (from_user_id, to_user_id, relationship)
         SELECT DISTINCT
-            user,
-            target,
+            user_id,
+            target_id,
             'watching'
-        FROM $old.df_tracking t
+        FROM $old.watches t
 
         -- ignore deleted users
         INNER JOIN $new.users u_from
-            ON t.user = u_from.id
+            ON t.user_id = u_from.id
         INNER JOIN $new.users u_to
-            ON t.target = u_to.id
+            ON t.target_id = u_to.id
     });
 };
 
 # TODO remove junk data, like admin blocks or self-blocks?
 import_data 'Blocks' => sub {
+    die 'Complete';
     # Some intermediate storage
     $dbh->do(qq{
         CREATE TEMPORARY TABLE $old.blocks (
@@ -192,7 +525,7 @@ import_data 'Blocks' => sub {
     # Fuck
     my $sth = $dbh->prepare(qq{
         SELECT userid, blocklist
-        FROM $old.df_users
+        FROM $old.users
         WHERE blocklist != ""
     });
     $sth->execute;
@@ -227,9 +560,10 @@ import_data 'Blocks' => sub {
 
     # Copy to new table
     $dbh->do(qq{
-        INSERT INTO $new.user_relationships
+        -- Some people have duplicate blocks...
+        INSERT IGNORE INTO $new.user_relationships
             (from_user_id, to_user_id, relationship)
-        SELECT DISTINCT
+        SELECT
             from_user_id,
             to_user_id,
             'blocking'
@@ -249,7 +583,7 @@ import_data 'News' => sub {
         INSERT INTO message_ids
             (other_id)
         SELECT rowid
-        FROM $old.df_news n
+        FROM $old.news n
 
         -- ignore deleted users
         INNER JOIN $new.users u
@@ -266,7 +600,7 @@ import_data 'News' => sub {
             subject,
             message,
             message
-        FROM $old.df_news n
+        FROM $old.news n
         INNER JOIN message_ids x
             ON n.rowid = x.other_id
     });
@@ -278,13 +612,14 @@ import_data 'News' => sub {
             x.id,
             1,
             0
-        FROM $old.df_news n
+        FROM $old.news n
         INNER JOIN message_ids x
             ON n.rowid = x.other_id
     });
 };
 
 import_data 'Notes' => sub {
+    die 'Complete';
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
@@ -333,7 +668,135 @@ import_data 'Notes' => sub {
 };
 
 # XXX comments
+# XXX factor out messages/discussion bits here
 import_data 'Journals' => sub {
+    do_discussions_setup({
+        table => 'journals',
+    });
+    do_messages_setup({
+        table => 'journals',
+    });
+
+    $dbh->do(qq{
+        INSERT INTO $new.messages
+            (id, user_id, time, title, content, content_parsed)
+        SELECT
+            x.id,
+            user_id,
+            date_posted,
+            subject,
+            message,
+            message
+        FROM $old.journals j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+    });
+    $dbh->do(qq{
+        INSERT INTO $new.journal_entries
+            (id, message_id, discussion_id, status)
+        SELECT
+            row_id,
+            x.id,
+            y.id,
+            'normal'
+        FROM $old.journals j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+        INNER JOIN discussion_ids y
+            ON j.row_id = y.other_id
+    });
+};
+
+import_data 'Journal comments' => sub {
+    do_messages_setup({
+        table => 'comments_journal',
+    });
+
+    $dbh->do(qq{
+        INSERT INTO $new.messages
+            (id, user_id, time, title, content, content_parsed)
+        SELECT
+            x.id,
+            user_id,
+            date_posted,
+            subject,
+            message,
+            message
+        FROM $old.comments_journal j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+    });
+
+    my $get_comments_sth = $dbh->prepare(qq{
+        SELECT
+            row_id fa_id,
+            parent_id parent_id,
+            x.id message_id
+        FROM $old.comments_journal j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+        WHERE j.entity_id = ?
+    });
+    my $add_comment_sth = $dbh->prepare(qq{
+        INSERT INTO $new.comments
+            (id, discussion_id, message_id, `left`, `right`)
+        VALUES
+            (NULL, ?, ?, ?, ?)
+    });
+    my $entity_sth = $dbh->prepare(qq{
+        SELECT id, discussion_id FROM $new.journal_entries
+    });
+    $entity_sth->execute;
+    while (my ($id, $discussion_id) = $entity_sth->fetchrow_array) {
+        my @tree;
+        my %node;
+        $get_comments_sth->execute($id);
+        while (my $row = $get_comments_sth->fetchrow_hashref) {
+            $row->{children} = [];
+            $node{ $row->{fa_id} } = $row;
+
+            if ($row->{parent_id}) {
+                push @{ $node{ $row->{parent_id} }{children} }, $row;
+            }
+            else {
+                push @tree, $row;
+            }
+        }
+
+        create_adjacency_list(\(my $anon = 1), @tree);
+
+        for my $id (sort keys %node) {
+            # XXX Early on, FA apparently allowed guests to reply to things
+            # under certain circumstances, so there are a handful of comments
+            # that have a user_id of 0, so they're not inserted into the
+            # messages table, so they're orphaned from the nodes in @tree,
+            # so they never got left/right assigned.  We can't insert rows
+            # with no matching user, so for now we're just discarding the
+            # orphan comments; if Ferrox supports deleted comments before
+            # release (i.e. no message row), we can just mark these bogus
+            # comments as deleted.  Note that in many cases the correct user
+            # logged in and reposted them, so orphaned guest comments might
+            # be scrappable entirely.
+            next if not defined $node{$id}{left};
+
+            $add_comment_sth->execute(
+                $discussion_id,
+                @{ $node{$id} }{qw/ message_id left right /}
+            );
+        }
+    }
+};
+
+################################################################################
+
+import_data 'User metadata' => sub { die 'todo' };
+
+import_data 'User preferences' => sub { die 'todo' };
+
+# XXX comments
+import_data 'Submissions' => sub {
+    die 'skip';
+    # Messages setup
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
@@ -342,11 +805,11 @@ import_data 'Journals' => sub {
         INSERT INTO message_ids
             (other_id)
         SELECT rowid
-        FROM $old.df_journals j
+        FROM $old.submissions s
 
         -- ignore deleted users
         INNER JOIN $new.users u
-            ON j.user = u.id
+            ON s.user = u.id
     });
 
     $dbh->do(qq{
@@ -356,40 +819,19 @@ import_data 'Journals' => sub {
             x.id,
             user,
             date,
-            subject,
+            title,
             message,
             message
-        FROM $old.df_journals j
+        FROM $old.submissions s
         INNER JOIN message_ids x
-            ON j.rowid = x.other_id
+            ON s.rowid = x.other_id
     });
     $dbh->do(qq{
-        INSERT INTO $new.journal_entries
-            (id, message_id, status)
+        INSERT INTO $new.submissions
+            (id, message_id, type, discussion_id, time, status, mogile_key, mimetype)
         SELECT
             rowid,
             x.id,
-            'normal'
-        FROM $old.df_journals j
-        INNER JOIN message_ids x
-            ON j.rowid = x.other_id
-    });
-};
-
-import_data 'User metadata' => sub { die 'todo' };
-
-import_data 'User preferences' => sub { die 'todo' };
-
-# XXX comments
-import_data 'Submissions' => sub {
-    $dbh->do(qq{
-        INSERT INTO $new.submissions
-            (id, title, description, description_parsed, type, discussion_id, time, status, mogile_key, mimetype, editlog_id)
-        SELECT
-            rowid,
-            title,
-            message,
-            message,
             CASE category
                 WHEN 'music'  THEN 'audio'
                 WHEN 'flash'  THEN 'video'
@@ -401,13 +843,10 @@ import_data 'Submissions' => sub {
             date,
             'normal',
             '',  -- XXX mogile importing
-            '',  -- XXX mimetype
-            NULL
-        FROM $old.df_submissions s
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON s.user = u.id
+            ''   -- XXX mimetype
+        FROM $old.submissions s
+        INNER JOIN message_ids x
+            ON s.rowid = x.other_id
     });
 
     # Artist association
@@ -419,28 +858,27 @@ import_data 'Submissions' => sub {
             rowid,
             'artist',
             'primary'
-        FROM $old.df_submissions s
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON s.user = u.id
+        FROM $old.submissions s
+        INNER JOIN message_ids x
+            ON s.rowid = x.other_id
     });
 };
 
 import_data 'Favorites' => sub {
     die 'skip';
     $dbh->do(qq{
-        INSERT INTO $new.favorite_submissions
+        -- There are, somehow, dupes in the source data
+        INSERT IGNORE INTO $new.favorite_submissions
             (user_id, submission_id)
         SELECT
-            user,
-            submissionid
-        FROM $old.df_favorites f
+            user_id,
+            submission_id
+        FROM $old.favorites f
 
         INNER JOIN $new.users u
-            ON f.user = u.id
+            ON f.user_id = u.id
         INNER JOIN $new.submissions s
-            ON f.submissionid = s.id
+            ON f.submission_id = s.id
     });
 };
 
