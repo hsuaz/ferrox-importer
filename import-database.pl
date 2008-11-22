@@ -883,7 +883,18 @@ import_data 'Favorites' => sub {
 };
 
 
-
+import_data 'Comment count' => sub {
+    $dbh->do(qq{
+        UPDATE discussions d
+        INNER JOIN (
+            SELECT discussion_id, COUNT(*) ct
+            FROM comments
+            GROUP BY discussion_id
+        ) c
+            ON c.discussion_id = d.id
+        SET comment_count = c.ct;
+    });
+};
 
 
 
