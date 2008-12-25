@@ -5,6 +5,12 @@
 # - comment COUNTS per discussion when all is said and done
 # - reconstruct note conversation threads
 
+# PROBLEMS
+# - news items need blank discussions
+# - rethreading is ~way too fuckin slow~
+# - need to be able to slap a limit on how many submissions and journals are imported
+# - need to import all three versions of images to mogile  :(
+
 ### STATUS
 #      artistinfo
 #           user_id
@@ -329,6 +335,10 @@ my $dbh = DBI->connect("dbi:mysql:$new", 'ferrox', '');
 
 STDOUT->autoflush(1);
 
+sub completed {
+    #die "Complete";
+}
+
 sub import_data {
     my ($action, $code_ref) = @_;
 
@@ -413,6 +423,87 @@ sub do_discussions_setup {
     return;
 }
 
+sub import_comments {
+    my ($comments_table, $new_entity_table) = @_;
+    do_messages_setup({
+        table => $comments_table,
+    });
+
+    $dbh->do(qq{
+        INSERT INTO $new.messages
+            (id, user_id, time, title, content, content_parsed)
+        SELECT
+            x.id,
+            user_id,
+            date_posted,
+            subject,
+            message,
+            message
+        FROM $old.$comments_table j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+    });
+
+    my $get_comments_sth = $dbh->prepare(qq{
+        SELECT
+            row_id fa_id,
+            parent_id parent_id,
+            x.id message_id
+        FROM $old.$comments_table j
+        INNER JOIN message_ids x
+            ON j.row_id = x.other_id
+        WHERE j.entity_id = ?
+    });
+    my $add_comment_sth = $dbh->prepare(qq{
+        INSERT INTO $new.comments
+            (id, discussion_id, message_id, `left`, `right`)
+        VALUES
+            (NULL, ?, ?, ?, ?)
+    });
+    my $entity_sth = $dbh->prepare(qq{
+        SELECT id, discussion_id FROM $new.$new_entity_table
+    });
+    $entity_sth->execute;
+    while (my ($id, $discussion_id) = $entity_sth->fetchrow_array) {
+        my @tree;
+        my %node;
+        $get_comments_sth->execute($id);
+        while (my $row = $get_comments_sth->fetchrow_hashref) {
+            $row->{children} = [];
+            $node{ $row->{fa_id} } = $row;
+
+            if ($row->{parent_id}) {
+                push @{ $node{ $row->{parent_id} }{children} }, $row;
+            }
+            else {
+                push @tree, $row;
+            }
+        }
+
+        create_adjacency_list(\(my $anon = 1), @tree);
+
+        for my $id (sort keys %node) {
+            # XXX Early on, FA apparently allowed guests to reply to things
+            # under certain circumstances, so there are a handful of comments
+            # that have a user_id of 0, so they're not inserted into the
+            # messages table, so they're orphaned from the nodes in @tree,
+            # so they never got left/right assigned.  We can't insert rows
+            # with no matching user, so for now we're just discarding the
+            # orphan comments; if Ferrox supports deleted comments before
+            # release (i.e. no message row), we can just mark these bogus
+            # comments as deleted.  Note that in many cases the correct user
+            # logged in and reposted them, so orphaned guest comments might
+            # be scrappable entirely.
+            next if not defined $node{$id}{left};
+
+            $add_comment_sth->execute(
+                $discussion_id,
+                @{ $node{$id} }{qw/ message_id left right /}
+            );
+        }
+    }
+}
+
 sub create_adjacency_list {
     my ($n_ref, @nodes) = @_;
     for my $node (@nodes) {
@@ -425,6 +516,24 @@ sub create_adjacency_list {
         ${$n_ref}++;
     }
 }
+
+
+
+### Clear out existing tables
+import_data 'Truncating' => sub {
+    my @tables = qw/
+        favorite_submissions
+        submissions
+
+
+    /;
+
+    for my $table (@tables) {
+        $dbh->do(qq{
+            TRUNCATE $new.$table
+        });
+    }
+};
 
 ### Need to use this table to collapse message ids together and keep them
 ### matched with their corresponding original rows
@@ -464,6 +573,7 @@ import_data 'Roles' => sub {
 };
 
 import_data 'Users' => sub {
+    completed;
     # Use IGNORE here to skip duplicated usernames; we only want the first
     # XXX use names or something
     $dbh->do(qq{
@@ -485,7 +595,7 @@ import_data 'Users' => sub {
 # Important all sorts of user stuff
 
 import_data 'Watches' => sub {
-    die 'Complete';
+    completed;
     $dbh->do(qq{
         INSERT INTO $new.user_relationships
             (from_user_id, to_user_id, relationship)
@@ -505,7 +615,7 @@ import_data 'Watches' => sub {
 
 # TODO remove junk data, like admin blocks or self-blocks?
 import_data 'Blocks' => sub {
-    die 'Complete';
+    completed;
     # Some intermediate storage
     $dbh->do(qq{
         CREATE TEMPORARY TABLE $old.blocks (
@@ -575,6 +685,7 @@ import_data 'Blocks' => sub {
 # -------------------------------------------------------------------------- #
 
 import_data 'News' => sub {
+    completed;
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
@@ -619,7 +730,7 @@ import_data 'News' => sub {
 };
 
 import_data 'Notes' => sub {
-    die 'Complete';
+    completed;
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
@@ -670,6 +781,7 @@ import_data 'Notes' => sub {
 # XXX comments
 # XXX factor out messages/discussion bits here
 import_data 'Journals' => sub {
+    completed;
     do_discussions_setup({
         table => 'journals',
     });
@@ -708,83 +820,8 @@ import_data 'Journals' => sub {
 };
 
 import_data 'Journal comments' => sub {
-    do_messages_setup({
-        table => 'comments_journal',
-    });
-
-    $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content, content_parsed)
-        SELECT
-            x.id,
-            user_id,
-            date_posted,
-            subject,
-            message,
-            message
-        FROM $old.comments_journal j
-        INNER JOIN message_ids x
-            ON j.row_id = x.other_id
-    });
-
-    my $get_comments_sth = $dbh->prepare(qq{
-        SELECT
-            row_id fa_id,
-            parent_id parent_id,
-            x.id message_id
-        FROM $old.comments_journal j
-        INNER JOIN message_ids x
-            ON j.row_id = x.other_id
-        WHERE j.entity_id = ?
-    });
-    my $add_comment_sth = $dbh->prepare(qq{
-        INSERT INTO $new.comments
-            (id, discussion_id, message_id, `left`, `right`)
-        VALUES
-            (NULL, ?, ?, ?, ?)
-    });
-    my $entity_sth = $dbh->prepare(qq{
-        SELECT id, discussion_id FROM $new.journal_entries
-    });
-    $entity_sth->execute;
-    while (my ($id, $discussion_id) = $entity_sth->fetchrow_array) {
-        my @tree;
-        my %node;
-        $get_comments_sth->execute($id);
-        while (my $row = $get_comments_sth->fetchrow_hashref) {
-            $row->{children} = [];
-            $node{ $row->{fa_id} } = $row;
-
-            if ($row->{parent_id}) {
-                push @{ $node{ $row->{parent_id} }{children} }, $row;
-            }
-            else {
-                push @tree, $row;
-            }
-        }
-
-        create_adjacency_list(\(my $anon = 1), @tree);
-
-        for my $id (sort keys %node) {
-            # XXX Early on, FA apparently allowed guests to reply to things
-            # under certain circumstances, so there are a handful of comments
-            # that have a user_id of 0, so they're not inserted into the
-            # messages table, so they're orphaned from the nodes in @tree,
-            # so they never got left/right assigned.  We can't insert rows
-            # with no matching user, so for now we're just discarding the
-            # orphan comments; if Ferrox supports deleted comments before
-            # release (i.e. no message row), we can just mark these bogus
-            # comments as deleted.  Note that in many cases the correct user
-            # logged in and reposted them, so orphaned guest comments might
-            # be scrappable entirely.
-            next if not defined $node{$id}{left};
-
-            $add_comment_sth->execute(
-                $discussion_id,
-                @{ $node{$id} }{qw/ message_id left right /}
-            );
-        }
-    }
+    completed;
+    import_comments('comments_journal', 'journal_entries');
 };
 
 ################################################################################
@@ -795,7 +832,6 @@ import_data 'User preferences' => sub { die 'todo' };
 
 # XXX comments
 import_data 'Submissions' => sub {
-    die 'skip';
     # Messages setup
     $dbh->do(qq{
         UPDATE message_ids
@@ -865,7 +901,6 @@ import_data 'Submissions' => sub {
 };
 
 import_data 'Favorites' => sub {
-    die 'skip';
     $dbh->do(qq{
         -- There are, somehow, dupes in the source data
         INSERT IGNORE INTO $new.favorite_submissions
@@ -881,6 +916,11 @@ import_data 'Favorites' => sub {
             ON f.submission_id = s.id
     });
 };
+
+import_data 'Submission comments' => sub {
+    import_comments('comments_submission', 'submissions');
+};
+
 
 
 import_data 'Comment count' => sub {
@@ -909,5 +949,6 @@ import_data 'Message formatting' => sub {
         SET
             content_parsed = content,
             content_short = content
+        WHERE content_parsed = ''
     });
 };
