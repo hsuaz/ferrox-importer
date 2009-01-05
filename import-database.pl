@@ -1,12 +1,13 @@
 #!/usr/bin/perl
 
 # NEXT UP
+# XXX make a $FROM_CLAUSE and $LIMIT_JOIN if $MAX_LIMIT exists, to avoid 
+#     needless joining when doing this for real
 # - comments woo
 # - comment COUNTS per discussion when all is said and done
 # - reconstruct note conversation threads
 
 # PROBLEMS
-# - news items need blank discussions
 # - rethreading is ~way too fuckin slow~
 # - need to be able to slap a limit on how many submissions and journals are imported
 # - need to import all three versions of images to mogile  :(
@@ -329,6 +330,11 @@ use warnings;
 use DBI;
 use IO::Handle;
 
+# For sanity and testing purposes, this limits how many notes, submissions,
+# and journals are actually imported.  This is first-come, first-serve, so
+# you'll end up with the first $MAX_ITEMS ids.
+my $MAX_ITEMS = 10;
+
 my $new = 'furaffinity';
 my $old = 'furaffinity_recent';
 my $dbh = DBI->connect("dbi:mysql:$new", 'ferrox', '');
@@ -336,7 +342,7 @@ my $dbh = DBI->connect("dbi:mysql:$new", 'ferrox', '');
 STDOUT->autoflush(1);
 
 sub completed {
-    #die "Complete";
+    die "Complete";
 }
 
 sub import_data {
@@ -383,10 +389,6 @@ sub do_messages_setup {
             (other_id)
         SELECT row_id
         FROM $old.$table t
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON t.user_id = u.id
     });
 }
 
@@ -404,10 +406,6 @@ sub do_discussions_setup {
             (other_id)
         SELECT row_id
         FROM $old.$table t
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON t.user_id = u.id
     });
 
     $dbh->do(qq{
@@ -434,14 +432,16 @@ sub import_comments {
             (id, user_id, time, title, content, content_parsed)
         SELECT
             x.id,
-            user_id,
-            date_posted,
-            subject,
-            message,
-            message
-        FROM $old.$comments_table j
+            c.user_id,
+            c.date_posted,
+            c.subject,
+            c.message,
+            c.message
+        FROM $old.$comments_table c
         INNER JOIN message_ids x
-            ON j.row_id = x.other_id
+            ON c.row_id = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
     });
 
     my $get_comments_sth = $dbh->prepare(qq{
@@ -449,10 +449,12 @@ sub import_comments {
             row_id fa_id,
             parent_id parent_id,
             x.id message_id
-        FROM $old.$comments_table j
+        FROM $old.$comments_table c
         INNER JOIN message_ids x
-            ON j.row_id = x.other_id
-        WHERE j.entity_id = ?
+            ON c.row_id = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
+        WHERE c.entity_id = ?
     });
     my $add_comment_sth = $dbh->prepare(qq{
         INSERT INTO $new.comments
@@ -522,10 +524,14 @@ sub create_adjacency_list {
 ### Clear out existing tables
 import_data 'Truncating' => sub {
     my @tables = qw/
+        news
+        notes
+        journal_entries
         favorite_submissions
+        user_submissions
         submissions
-
-
+        messages
+        discussions
     /;
 
     for my $table (@tables) {
@@ -604,12 +610,6 @@ import_data 'Watches' => sub {
             target_id,
             'watching'
         FROM $old.watches t
-
-        -- ignore deleted users
-        INNER JOIN $new.users u_from
-            ON t.user_id = u_from.id
-        INNER JOIN $new.users u_to
-            ON t.target_id = u_to.id
     });
 };
 
@@ -685,20 +685,11 @@ import_data 'Blocks' => sub {
 # -------------------------------------------------------------------------- #
 
 import_data 'News' => sub {
-    completed;
-    $dbh->do(qq{
-        UPDATE message_ids
-        SET other_id = NULL
+    do_discussions_setup({
+        table => 'news',
     });
-    $dbh->do(qq{
-        INSERT INTO message_ids
-            (other_id)
-        SELECT rowid
-        FROM $old.news n
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON n.user = u.id
+    do_messages_setup({
+        table => 'news',
     });
 
     $dbh->do(qq{
@@ -713,24 +704,23 @@ import_data 'News' => sub {
             message
         FROM $old.news n
         INNER JOIN message_ids x
-            ON n.rowid = x.other_id
+            ON n.row_id = x.other_id
     });
     $dbh->do(qq{
         INSERT INTO $new.news
             (id, message_id, is_anonymous, is_deleted)
         SELECT
-            rowid,
+            row_id,
             x.id,
             1,
             0
         FROM $old.news n
         INNER JOIN message_ids x
-            ON n.rowid = x.other_id
+            ON n.row_id = x.other_id
     });
 };
 
 import_data 'Notes' => sub {
-    completed;
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
@@ -740,12 +730,6 @@ import_data 'Notes' => sub {
             (other_id)
         SELECT rowid
         FROM $old.df_usermessages_Notes n
-
-        -- ignore deleted users
-        INNER JOIN $new.users u_from
-            ON n.fromlower = u_from.username
-        INNER JOIN $new.users u_to
-            ON n.targetid = u_to.id
     });
 
     $dbh->do(qq{
@@ -762,6 +746,7 @@ import_data 'Notes' => sub {
             ON n.rowid = x.other_id
         INNER JOIN $new.users u_from
             ON n.fromlower = u_from.username
+        LIMIT $MAX_ITEMS
     });
     $dbh->do(qq{
         INSERT INTO $new.notes
@@ -775,13 +760,12 @@ import_data 'Notes' => sub {
         FROM $old.df_usermessages_Notes n
         INNER JOIN message_ids x
             ON n.rowid = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
     });
 };
 
-# XXX comments
-# XXX factor out messages/discussion bits here
 import_data 'Journals' => sub {
-    completed;
     do_discussions_setup({
         table => 'journals',
     });
@@ -802,6 +786,8 @@ import_data 'Journals' => sub {
         FROM $old.journals j
         INNER JOIN message_ids x
             ON j.row_id = x.other_id
+        ORDER BY j.row_id ASC
+        LIMIT $MAX_ITEMS
     });
     $dbh->do(qq{
         INSERT INTO $new.journal_entries
@@ -814,13 +800,14 @@ import_data 'Journals' => sub {
         FROM $old.journals j
         INNER JOIN message_ids x
             ON j.row_id = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
         INNER JOIN discussion_ids y
             ON j.row_id = y.other_id
     });
 };
 
 import_data 'Journal comments' => sub {
-    completed;
     import_comments('comments_journal', 'journal_entries');
 };
 
@@ -842,10 +829,6 @@ import_data 'Submissions' => sub {
             (other_id)
         SELECT rowid
         FROM $old.submissions s
-
-        -- ignore deleted users
-        INNER JOIN $new.users u
-            ON s.user = u.id
     });
 
     $dbh->do(qq{
@@ -861,6 +844,8 @@ import_data 'Submissions' => sub {
         FROM $old.submissions s
         INNER JOIN message_ids x
             ON s.rowid = x.other_id
+        ORDER BY s.rowid ASC
+        LIMIT $MAX_ITEMS
     });
     $dbh->do(qq{
         INSERT INTO $new.submissions
@@ -883,6 +868,8 @@ import_data 'Submissions' => sub {
         FROM $old.submissions s
         INNER JOIN message_ids x
             ON s.rowid = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
     });
 
     # Artist association
@@ -897,6 +884,8 @@ import_data 'Submissions' => sub {
         FROM $old.submissions s
         INNER JOIN message_ids x
             ON s.rowid = x.other_id
+        INNER JOIN messages m
+            ON m.id = x.id
     });
 };
 
@@ -909,9 +898,6 @@ import_data 'Favorites' => sub {
             user_id,
             submission_id
         FROM $old.favorites f
-
-        INNER JOIN $new.users u
-            ON f.user_id = u.id
         INNER JOIN $new.submissions s
             ON f.submission_id = s.id
     });
