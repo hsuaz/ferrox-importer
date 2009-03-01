@@ -3,14 +3,9 @@
 # NEXT UP
 # XXX make a $FROM_CLAUSE and $LIMIT_JOIN if $MAX_LIMIT exists, to avoid 
 #     needless joining when doing this for real
-# - comments woo
-# - comment COUNTS per discussion when all is said and done
-# - reconstruct note conversation threads
 
 # PROBLEMS
 # - rethreading is ~way too fuckin slow~
-# - need to be able to slap a limit on how many submissions and journals are imported
-# - need to import all three versions of images to mogile  :(
 
 ### STATUS
 #      artistinfo
@@ -190,12 +185,7 @@
 #           target_id
 #           date_viewed
 
-#      shouts
-#           row_id
-#           date_posted
-#           target_id
-#           user_id
-#           message
+# DONE shouts
 
 #      submissions
 #      DONE rowid
@@ -205,9 +195,9 @@
 #      SKIP username
 #      SKIP lower
 #      DONE title
-#           url
-#           smallerurl
-#           thumbnail
+#      FRGN url
+#      FRGN smallerurl
+#      FRGN thumbnail
 #           keywords
 #      DONE message
 #           numtracked
@@ -331,9 +321,8 @@ use DBI;
 use IO::Handle;
 
 # For sanity and testing purposes, this limits how many notes, submissions,
-# and journals are actually imported.  This is first-come, first-serve, so
-# you'll end up with the first $MAX_ITEMS ids.
-my $MAX_ITEMS = 10;
+# and journals are actually imported.  Recent items come before older ones.
+my $MAX_ITEMS = 500;
 
 my $new = 'furaffinity';
 my $old = 'furaffinity_recent';
@@ -342,7 +331,7 @@ my $dbh = DBI->connect("dbi:mysql:$new", 'ferrox', '');
 STDOUT->autoflush(1);
 
 sub completed {
-    die "Complete";
+    #die "Complete";
 }
 
 sub import_data {
@@ -376,23 +365,6 @@ sub import_data {
 }
 
 
-sub do_messages_setup {
-    my ($args_ref) = @_;
-    my $table = $args_ref->{table};
-
-    $dbh->do(qq{
-        UPDATE message_ids
-        SET other_id = NULL
-    });
-    $dbh->do(qq{
-        INSERT INTO message_ids
-            (other_id)
-        SELECT row_id
-        FROM $old.$table t
-    });
-}
-
-
 sub do_discussions_setup {
     my ($args_ref) = @_;
     my $table = $args_ref->{table};
@@ -423,44 +395,27 @@ sub do_discussions_setup {
 
 sub import_comments {
     my ($comments_table, $new_entity_table) = @_;
-    do_messages_setup({
-        table => $comments_table,
-    });
-
-    $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content, content_parsed)
-        SELECT
-            x.id,
-            c.user_id,
-            c.date_posted,
-            c.subject,
-            c.message,
-            c.message
-        FROM $old.$comments_table c
-        INNER JOIN message_ids x
-            ON c.row_id = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
-    });
 
     my $get_comments_sth = $dbh->prepare(qq{
         SELECT
-            row_id fa_id,
-            parent_id parent_id,
-            x.id message_id
+            c.row_id fa_id,
+            c.parent_id parent_id,
+            c.user_id user_id,
+            c.date_posted time,
+            c.subject title,
+            c.message content
         FROM $old.$comments_table c
-        INNER JOIN message_ids x
-            ON c.row_id = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
+        INNER JOIN $new.users u
+            ON c.user_id = u.id
         WHERE c.entity_id = ?
+        ORDER BY c.row_id DESC
+        LIMIT $MAX_ITEMS
     });
     my $add_comment_sth = $dbh->prepare(qq{
         INSERT INTO $new.comments
-            (id, discussion_id, message_id, `left`, `right`)
+            (id, discussion_id, `left`, `right`, user_id, time, title, content)
         VALUES
-            (NULL, ?, ?, ?, ?)
+            (NULL, ?, ?, ?, ?, ?, ?, ?)
     });
     my $entity_sth = $dbh->prepare(qq{
         SELECT id, discussion_id FROM $new.$new_entity_table
@@ -487,8 +442,8 @@ sub import_comments {
         for my $id (sort keys %node) {
             # XXX Early on, FA apparently allowed guests to reply to things
             # under certain circumstances, so there are a handful of comments
-            # that have a user_id of 0, so they're not inserted into the
-            # messages table, so they're orphaned from the nodes in @tree,
+            # that have a user_id of 0, so they're skipped by the INNER JOIN
+            # to the users table, so they're orphaned from the nodes in @tree,
             # so they never got left/right assigned.  We can't insert rows
             # with no matching user, so for now we're just discarding the
             # orphan comments; if Ferrox supports deleted comments before
@@ -500,7 +455,10 @@ sub import_comments {
 
             $add_comment_sth->execute(
                 $discussion_id,
-                @{ $node{$id} }{qw/ message_id left right /}
+                @{ $node{$id} }{qw/
+                    left right
+                    user_id time title content
+                /}
             );
         }
     }
@@ -524,13 +482,15 @@ sub create_adjacency_list {
 ### Clear out existing tables
 import_data 'Truncating' => sub {
     my @tables = qw/
+        user_relationships
         news
         notes
         journal_entries
         favorite_submissions
         user_submissions
+        derived_submissions
         submissions
-        messages
+        comments
         discussions
     /;
 
@@ -601,11 +561,12 @@ import_data 'Users' => sub {
 # Important all sorts of user stuff
 
 import_data 'Watches' => sub {
+    die "alright this takes AGES seriously";
     completed;
     $dbh->do(qq{
-        INSERT INTO $new.user_relationships
+        INSERT IGNORE INTO $new.user_relationships
             (from_user_id, to_user_id, relationship)
-        SELECT DISTINCT
+        SELECT
             user_id,
             target_id,
             'watching'
@@ -634,8 +595,10 @@ import_data 'Blocks' => sub {
 
     # Fuck
     my $sth = $dbh->prepare(qq{
-        SELECT userid, blocklist
-        FROM $old.users
+        SELECT u.userid, u.blocklist
+        FROM $old.users u
+        INNER JOIN $new.users u2
+            ON u.userid = u2.id
         WHERE blocklist != ""
     });
     $sth->execute;
@@ -682,86 +645,93 @@ import_data 'Blocks' => sub {
     });
 };
 
+import_data 'Shouts' => sub {
+    do_discussions_setup({
+        table => 'users',
+    });
+
+    # left and right need to just increment within the same user to make each
+    # shout the root of its own comment tree:
+    # 1 shout1 2   3 shout2 4  5 shout3 6
+    # To do this, we start a counter, increment it with each insertion, and
+    # reset it to zero when we start on a new user.  Have to do the user_id
+    # column AFTER left/right!
+    $dbh->do(q{ SET @last_user = 0 });
+    $dbh->do(q{ SET @leftright = 0 });
+    $dbh->do(qq{
+        INSERT INTO $new.comments
+            (id, discussion_id, `left`, `right`, user_id, time, title, content)
+        SELECT
+            NULL,
+            x.id,
+            IF(user_id = \@last_user, \@leftright := \@leftright + 1, \@leftright = 1),
+            (\@leftright := \@leftright + 1),
+            (\@last_user := user_id),
+            date_posted,
+            '',
+            message
+        FROM $old.shouts s
+        INNER JOIN discussion_ids x
+            ON s.target_id = x.other_id
+        ORDER BY s.user_id
+    });
+};
+
 # -------------------------------------------------------------------------- #
 
 import_data 'News' => sub {
     do_discussions_setup({
         table => 'news',
     });
-    do_messages_setup({
-        table => 'news',
-    });
 
     $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content, content_parsed)
-        SELECT
-            x.id,
-            user,
-            date,
-            subject,
-            message,
-            message
-        FROM $old.news n
-        INNER JOIN message_ids x
-            ON n.row_id = x.other_id
-    });
-    $dbh->do(qq{
         INSERT INTO $new.news
-            (id, message_id, is_anonymous, is_deleted)
+            (id, discussion_id, is_anonymous, is_deleted, user_id, time, title, content)
         SELECT
             row_id,
             x.id,
             1,
-            0
+            0,
+            user,
+            date,
+            subject,
+            message
         FROM $old.news n
-        INNER JOIN message_ids x
+        INNER JOIN $new.users u
+            ON n.user = u.id
+        INNER JOIN discussion_ids x
             ON n.row_id = x.other_id
+        ORDER BY n.row_id DESC
+        LIMIT $MAX_ITEMS
     });
 };
 
+# XXX should original_note_id always be == id here?
 import_data 'Notes' => sub {
     $dbh->do(qq{
         UPDATE message_ids
         SET other_id = NULL
     });
-    $dbh->do(qq{
-        INSERT INTO message_ids
-            (other_id)
-        SELECT rowid
-        FROM $old.df_usermessages_Notes n
-    });
 
     $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content)
+        INSERT INTO $new.notes
+            (id, to_user_id, original_note_id, status, from_user_id, time, title, content)
         SELECT
-            x.id,
+            rowid,
+            targetid,
+            rowid,
+            IF(isread, 'read', 'unread'),
             u_from.id,
             n.thisdate,
             n.title,
             n.message
         FROM $old.df_usermessages_Notes n
-        INNER JOIN message_ids x
-            ON n.rowid = x.other_id
+        INNER JOIN $new.users u_to
+            ON n.targetid = u_to.id
         INNER JOIN $new.users u_from
             ON n.fromlower = u_from.username
+        ORDER BY n.rowid DESC
         LIMIT $MAX_ITEMS
-    });
-    $dbh->do(qq{
-        INSERT INTO $new.notes
-            (id, message_id, to_user_id, original_note_id, status)
-        SELECT
-            rowid,
-            x.id,
-            targetid,
-            rowid,
-            IF(isread, 'read', 'unread')
-        FROM $old.df_usermessages_Notes n
-        INNER JOIN message_ids x
-            ON n.rowid = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
     });
 };
 
@@ -769,41 +739,25 @@ import_data 'Journals' => sub {
     do_discussions_setup({
         table => 'journals',
     });
-    do_messages_setup({
-        table => 'journals',
-    });
 
     $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content, content_parsed)
-        SELECT
-            x.id,
-            user_id,
-            date_posted,
-            subject,
-            message,
-            message
-        FROM $old.journals j
-        INNER JOIN message_ids x
-            ON j.row_id = x.other_id
-        ORDER BY j.row_id ASC
-        LIMIT $MAX_ITEMS
-    });
-    $dbh->do(qq{
         INSERT INTO $new.journal_entries
-            (id, message_id, discussion_id, status)
+            (id, discussion_id, status, user_id, time, title, content)
         SELECT
             row_id,
             x.id,
-            y.id,
-            'normal'
+            'normal',
+            user_id,
+            date_posted,
+            subject,
+            message
         FROM $old.journals j
-        INNER JOIN message_ids x
+        INNER JOIN $new.users u
+            ON j.user_id = u.id
+        INNER JOIN discussion_ids x
             ON j.row_id = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
-        INNER JOIN discussion_ids y
-            ON j.row_id = y.other_id
+        ORDER BY j.row_id DESC
+        LIMIT $MAX_ITEMS
     });
 };
 
@@ -819,40 +773,15 @@ import_data 'User preferences' => sub { die 'todo' };
 
 # XXX comments
 import_data 'Submissions' => sub {
-    # Messages setup
-    $dbh->do(qq{
-        UPDATE message_ids
-        SET other_id = NULL
-    });
-    $dbh->do(qq{
-        INSERT INTO message_ids
-            (other_id)
-        SELECT rowid
-        FROM $old.submissions s
+    do_discussions_setup({
+        table => 'submissions',
     });
 
     $dbh->do(qq{
-        INSERT INTO $new.messages
-            (id, user_id, time, title, content, content_parsed)
-        SELECT
-            x.id,
-            user,
-            date,
-            title,
-            message,
-            message
-        FROM $old.submissions s
-        INNER JOIN message_ids x
-            ON s.rowid = x.other_id
-        ORDER BY s.rowid ASC
-        LIMIT $MAX_ITEMS
-    });
-    $dbh->do(qq{
         INSERT INTO $new.submissions
-            (id, message_id, type, discussion_id, time, status, mogile_key, mimetype)
+            (id, type, discussion_id, time, title, status, mogile_key, mimetype)
         SELECT
-            rowid,
-            x.id,
+            row_id,
             CASE category
                 WHEN 'music'  THEN 'audio'
                 WHEN 'flash'  THEN 'video'
@@ -860,32 +789,35 @@ import_data 'Submissions' => sub {
                 WHEN 'poetry' THEN 'text'
                 ELSE               'image'
             END,
-            NULL,  -- XXX discussions
+            y.id,
             date,
+            title,
             'normal',
-            '',  -- XXX mogile importing
-            ''   -- XXX mimetype
+            '',
+            ''  -- XXX mimetype
         FROM $old.submissions s
-        INNER JOIN message_ids x
-            ON s.rowid = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
+        INNER JOIN $new.users u
+            ON s.user = u.id
+        INNER JOIN discussion_ids y
+            ON s.row_id = y.other_id
+        ORDER BY s.row_id DESC
+        LIMIT $MAX_ITEMS
     });
 
     # Artist association
     $dbh->do(qq{
         INSERT INTO $new.user_submissions
-            (user_id, submission_id, relationship, ownership_status)
+            (user_id, submission_id, relationship, ownership_status, time, content)
         SELECT
-            user,
-            rowid,
+            s.user,
+            s.row_id,
             'artist',
-            'primary'
+            'primary',
+            date,
+            message
         FROM $old.submissions s
-        INNER JOIN message_ids x
-            ON s.rowid = x.other_id
-        INNER JOIN messages m
-            ON m.id = x.id
+        INNER JOIN $new.submissions s2
+            ON s.row_id = s2.id
     });
 };
 
@@ -930,11 +862,14 @@ import_data 'Comment count' => sub {
 # - change all newlines to UNIX style
 # - parse bbcode!
 import_data 'Message formatting' => sub {
-    $dbh->do(qq{
-        UPDATE $new.messages
-        SET
-            content_parsed = content,
-            content_short = content
-        WHERE content_parsed = ''
-    });
+    die "nop";
+
+    for my $message_table (qw( news notes journals submissions comments )) {
+        $dbh->do(qq{
+            UPDATE $new.$message_table
+            SET
+                foo = bar
+            WHERE id = something
+        });
+    }
 };
