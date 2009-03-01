@@ -46,7 +46,7 @@ my $sth = $dbh->prepare(qq{
         s_old.thumbnail thumb
     FROM $new.submissions s
     INNER JOIN $old.submissions s_old
-        ON s.id = s_old.rowid
+        ON s.id = s_old.row_id
 });
 $sth->execute;
 

@@ -10,9 +10,12 @@ my $db = 'furaffinity_recent';
 my $dbh = DBI->connect("dbi:mysql:$db", 'ferrox', '');
 my $sth;
 
-# Rename news's primary key for consistency + sanity
+# Rename some primary keys for consistency + sanity
 $dbh->do(qq{
     ALTER TABLE news CHANGE rowid row_id INT UNSIGNED NOT NULL
+});
+$dbh->do(qq{
+    ALTER TABLE submissions CHANGE rowid row_id INT UNSIGNED NOT NULL
 });
 
 ### Username fixing

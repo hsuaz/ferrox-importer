@@ -322,7 +322,7 @@ use IO::Handle;
 
 # For sanity and testing purposes, this limits how many notes, submissions,
 # and journals are actually imported.  Recent items come before older ones.
-my $MAX_ITEMS = 500;
+my $MAX_ITEMS = 1000;
 
 my $new = 'furaffinity';
 my $old = 'furaffinity_recent';
