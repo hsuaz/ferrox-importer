@@ -368,6 +368,7 @@ sub import_data {
 sub do_discussions_setup {
     my ($args_ref) = @_;
     my $table = $args_ref->{table};
+    my $key   = $args_ref->{key} || 'row_id';
 
     $dbh->do(qq{
         UPDATE discussion_ids
@@ -376,7 +377,7 @@ sub do_discussions_setup {
     $dbh->do(qq{
         INSERT INTO discussion_ids
             (other_id)
-        SELECT row_id
+        SELECT $key
         FROM $old.$table t
     });
 
@@ -489,6 +490,8 @@ import_data 'Truncating' => sub {
         favorite_submissions
         user_submissions
         derived_submissions
+        submission_tags
+        tags
         submissions
         comments
         discussions
@@ -648,6 +651,7 @@ import_data 'Blocks' => sub {
 import_data 'Shouts' => sub {
     do_discussions_setup({
         table => 'users',
+        key   => 'userid',
     });
 
     # left and right need to just increment within the same user to make each
@@ -664,16 +668,24 @@ import_data 'Shouts' => sub {
         SELECT
             NULL,
             x.id,
-            IF(user_id = \@last_user, \@leftright := \@leftright + 1, \@leftright = 1),
+            IF(target_id = \@last_user, \@leftright := \@leftright + 1, \@leftright := 1),
             (\@leftright := \@leftright + 1),
-            (\@last_user := user_id),
+            (\@last_user := target_id) * 0 + s.user_id,
             date_posted,
             '',
             message
         FROM $old.shouts s
         INNER JOIN discussion_ids x
             ON s.target_id = x.other_id
-        ORDER BY s.user_id
+        ORDER BY s.target_id
+        LIMIT $MAX_ITEMS
+    });
+
+    $dbh->do(qq{
+        UPDATE $new.users u
+        INNER JOIN discussion_ids x
+            ON u.id = x.other_id
+        SET discussion_id = x.id
     });
 };
 

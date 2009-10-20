@@ -57,10 +57,16 @@ while (my $row = $sth->fetchrow_hashref) {
         next if not $path;
 
         my $file = $view . $id;
-        $ua->get(
-            'http://d.furaffinity.net/' . $path,
-            ':content_file' => "$FAKEMOGILE_DIR/$file",
-        );
+        my $full_path = "$FAKEMOGILE_DIR/$file";
+        if (-e $full_path) {
+            print "(already got $file)\n";
+        }
+        else {
+            $ua->get(
+                'http://d.furaffinity.net/' . $path,
+                ':content_file' => "$FAKEMOGILE_DIR/$file",
+            );
+        }
 
         $update_sth->execute($file, $id);
     }
